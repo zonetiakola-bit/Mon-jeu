@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Jeu Multijoueur 2D</title>
+  <style>
+    body {
+      background-color: #1a1a1a;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    #start-screen {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    #start-form {
+      background: #222;
+      padding: 30px;
+      border-radius: 10px;
+      border: 1px solid #444;
+    }
+    #start-form input {
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 5px;
+      border: 1px solid #555;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+    #start-form button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background-color: #008CBA;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #game-container {
+      position: relative;
+      display: none;
+    }
+    canvas {
+      border: 3px solid #fff;
+      background: #111;
+      cursor: crosshair;
+    }
+    #leaderboard {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid #444;
+      border-radius: 5px;
+      padding: 10px 15px;
+      text-align: left;
+      min-width: 150px;
+      pointer-events: none;
+    }
+    #leaderboard h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: #FFD700;
+      text-transform: uppercase;
+      border-bottom: 1px solid #555;
+    }
+    #leaderboard ol {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="start-screen">
+    <div id="start-form">
+      <h2>Bienvenue !</h2>
+      <p>Entrez votre pseudo pour jouer :</p>
+      <input type="text" id="usernameInput" maxlength="12" placeholder="Ex: Joueur1" autofocus>
+      <br>
+      <button id="joinBtn">Rejoindre la partie</button>
+    </div>
+  </div>
+
+  <div id="game-container">
+    <h1>Arena 2D Multijoueur</h1>
+    <p>Z/Q/S/D pour se déplacer | Clic gauche pour tirer</p>
+    <div style="position: relative; display: inline-block;">
+      <canvas id="gameCanvas" width="800" height="500"></canvas>
+      <div id="leaderboard">
+        <h3>Classement</h3>
+        <ol id="scoresList"></ol>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const startScreen = document.getElementById('start-screen');
+    const gameContainer = document.getElementById('game-container');
+    const usernameInput = document.getElementById('usernameInput');
+    const joinBtn = document.getElementById('joinBtn');
+    const scoresList = document.getElementById('scoresList');
+
+    let mapWalls = [];
+    const inputs = { up: false, down: false, left: false, right: false };
+
+    function joinGame() {
+      const username = usernameInput.value.trim() || 'Anonyme';
+      socket.emit('initPlayer', { name: username });
+      startScreen.style.display = 'none';
+      gameContainer.style.display = 'block';
+    }
+
+    joinBtn.addEventListener('click', joinGame);
+    usernameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') joinGame();
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      socket.emit('shoot', { x: clickX, y: clickY });
+    });
+
+    window.addEventListener('keydown', (e) => handleKey(e.key, true));
+    window.addEventListener('keyup', (e) => handleKey(e.key, false));
+
+    function handleKey(key, isPressed) {
+      let changed = false;
+      const k = key.toLowerCase();
+      if (k === 'arrowup' || k === 'z' || k === 'w') { inputs.up = isPressed; changed = true; }
+      if (k === 'arrowdown' || k === 's') { inputs.down = isPressed; changed = true; }
+      if (k === 'arrowleft' || k === 'q' || k === 'a') { inputs.left = isPressed; changed = true; }
+      if (k === 'arrowright' || k === 'd') { inputs.right = isPressed; changed = true; }
+      if (changed) socket.emit('playerInput', inputs);
+    }
+
+    socket.on('mapInit', (data) => { mapWalls = data.walls; });
+
+    socket.on('gameState', (state) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#555';
+      for (const wall of mapWalls) {
+        ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
+      }
+
+      ctx.fillStyle = '#FFD700';
+      for (const b of state.bullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.closePath();
+      }
+
+      for (const id in state.players) {
+        const p = state.players[id];
+
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.size, p.size);
+
+        if (id === socket.id) {
+          ctx.strokeStyle = '#FFF';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(p.x, p.y, p.size, p.size);
+        }
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.name, p.x + p.size / 2, p.y - 16);
+
+        const barWidth = 40;
+        const barHeight = 5;
+        const barX = p.x + (p.size / 2) - (barWidth / 2);
+        const barY = p.y - 10;
+
+        ctx.fillStyle = '#FF0000';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+
+        const currentHpWidth = (p.hp / p.maxHp) * barWidth;
+        ctx.fillStyle = '#00FF00';
+        ctx.fillRect(barX, barY, currentHpWidth, barHeight);
+      }
+
+      updateLeaderboard(state.players);
+    });
+
+    function updateLeaderboard(players) {
+      const sortedPlayers = Object.values(players).sort((a, b) => b.kills - a.kills);
+      scoresList.innerHTML = sortedPlayers.map(p => 
+        `<li><strong>${p.name}</strong> : ${p.kills} kill${p.kills > 1 ? 's' : ''}</li>`
+      ).join('');
+    }
+  </script>
+</body>
+</html>
